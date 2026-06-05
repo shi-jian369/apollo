@@ -72,6 +72,13 @@ docs/demo_guide/*.record
 
 # buildtool cache and others
 dev/
+.buildtool.conf
+.env
+.workspace.json
+dumps/
+*.tar.gz
+*.tar.gz.*
+profiles/current
 
 # bazel cache and others
 .cache/
