@@ -18,10 +18,13 @@
  * @file
  **/
 
+#include <algorithm>
+
 #include "modules/planning/scenarios/traffic_light_unprotected_right_turn/traffic_light_unprotected_right_turn_scenario.h"
 
 #include "modules/common_msgs/perception_msgs/perception_obstacle.pb.h"
 #include "modules/common_msgs/perception_msgs/traffic_light_detection.pb.h"
+#include "modules/common/math/math_utils.h"
 #include "cyber/common/log.h"
 #include "cyber/time/clock.h"
 #include "modules/common/vehicle_state/vehicle_state_provider.h"
@@ -123,11 +126,38 @@ bool TrafficLightUnprotectedRightTurnScenario::IsTransferable(
   if (!traffic_light_scenario) {
     return false;
   }
-  const auto& turn_type =
-      reference_line_info.GetPathTurnType(traffic_sign_overlap->start_s);
-  if (turn_type != hdmap::Lane::RIGHT_TURN) {
+  const double traffic_light_s = traffic_sign_overlap->start_s;
+  const auto& turn_type = reference_line_info.GetPathTurnType(traffic_light_s);
+
+  // Some contest maps do not mark the lane turn type near the signal overlap.
+  // Fall back to the reference-line geometry: a right turn is a noticeable
+  // clockwise heading change after the stop line.
+  static constexpr double kRightTurnCheckBackwardDistance = 5.0;   // unit: m
+  static constexpr double kRightTurnCheckForwardDistance = 40.0;   // unit: m
+  static constexpr double kMinRightTurnHeadingDiff = 0.45;         // unit: rad
+  const auto& reference_line = reference_line_info.reference_line();
+  const double before_s =
+      std::max(0.0, traffic_light_s - kRightTurnCheckBackwardDistance);
+  const double after_s = std::min(
+      reference_line.Length(), traffic_light_s + kRightTurnCheckForwardDistance);
+  const double before_heading =
+      reference_line.GetReferencePoint(before_s).heading();
+  const double after_heading = reference_line.GetReferencePoint(after_s).heading();
+  const double heading_diff =
+      common::math::AngleDiff(before_heading, after_heading);
+  const bool is_geometry_right_turn =
+      heading_diff < -kMinRightTurnHeadingDiff;
+
+  AINFO << "Traffic light right turn check: traffic_light_s["
+        << traffic_light_s << "] turn_type[" << turn_type << "] before_s["
+        << before_s << "] after_s[" << after_s << "] before_heading["
+        << before_heading << "] after_heading[" << after_heading
+        << "] heading_diff[" << heading_diff << "] geometry_right_turn["
+        << is_geometry_right_turn << "]";
+  if (turn_type != hdmap::Lane::RIGHT_TURN && !is_geometry_right_turn) {
     return false;
   }
+  AINFO << "Accept TRAFFIC_LIGHT_UNPROTECTED_RIGHT_TURN scenario";
   context_.current_traffic_light_overlap_ids.clear();
   for (const auto& overlap : next_traffic_lights) {
     context_.current_traffic_light_overlap_ids.push_back(overlap.object_id);
